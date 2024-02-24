@@ -1426,6 +1426,10 @@ class GenerationMixin:
         prepared_stopping_criteria = self._get_stopping_criteria(
             generation_config=generation_config, stopping_criteria=stopping_criteria
         )
+
+        # print(generation_config)
+        # print(generation_mode)
+
         # 10. go into different generation modes
         if generation_mode == GenerationMode.ASSISTED_GENERATION:
             if generation_config.num_return_sequences > 1:
@@ -2547,6 +2551,22 @@ class GenerationMixin:
         >>> tokenizer.batch_decode(outputs, skip_special_tokens=True)
         ['Today is a beautiful day, and we must do everything possible to make it a day of celebration.']
         ```"""
+
+        # print(input_ids)
+        # print(logits_processor)
+        # print(stopping_criteria)
+        # print(logits_warper)
+        # print(max_length)  # None
+        # print(pad_token_id)  # 0
+        # print(eos_token_id)  # 2
+        # print(output_attentions)  # False
+        # print(output_hidden_states)  # False
+        # print(output_scores)  # True
+        # print(return_dict_in_generate)  # True
+        # print(synced_gpus)  # False
+        # print(streamer)  # None
+        # print(model_kwargs)  # 'attention_mask' (bs, seq_len), 'use_cache': True
+
         # init values
         logits_processor = logits_processor if logits_processor is not None else LogitsProcessorList()
         stopping_criteria = stopping_criteria if stopping_criteria is not None else StoppingCriteriaList()
@@ -2594,6 +2614,7 @@ class GenerationMixin:
 
         this_peer_finished = False  # used by synced_gpus only
         # auto-regressive generation
+        # gen = 0
         while True:
             if synced_gpus:
                 # Under synced_gpus the `forward` call must continue until all gpus complete their sequence.
@@ -2607,6 +2628,15 @@ class GenerationMixin:
 
             # prepare model inputs
             model_inputs = self.prepare_inputs_for_generation(input_ids, **model_kwargs)
+
+            # gen += 1
+            # if gen > 2:
+            #     raise Exception
+            # print('generation')
+            # print(model_inputs.keys())  # dict_keys(['input_ids', 'position_ids', 'past_key_values', 'use_cache', 'attention_mask'])
+            # print(model_inputs['input_ids'].shape)  # [1, 284] --> [1, 1]
+            # print(model_inputs['position_ids'].shape)  # [1, 284] --> [1, 1]
+            # print(model_inputs['attention_mask'].shape)  # [1, 284] --> [1, 285]
 
             # forward pass to get next token
             outputs = self(
@@ -2677,6 +2707,8 @@ class GenerationMixin:
 
             if this_peer_finished and not synced_gpus:
                 break
+
+        # raise Exception
 
         if streamer is not None:
             streamer.end()

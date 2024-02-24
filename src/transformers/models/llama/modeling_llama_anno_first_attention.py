@@ -49,10 +49,7 @@ from ...utils import (
     replace_return_docstrings,
 )
 from ...utils.import_utils import is_torch_fx_available
-from .configuration_llama import LlamaConfig, TrustLlamaConfig
-from ..auto.modeling_auto import AutoModelForCausalLM
-from ...utils import SAFE_WEIGHTS_NAME
-from ...modeling_utils import _add_variant, load_state_dict
+from .configuration_llama import LlamaConfig
 
 
 if is_flash_attn_2_available():
@@ -72,36 +69,6 @@ if is_torch_fx_available():
 logger = logging.get_logger(__name__)
 
 _CONFIG_FOR_DOC = "LlamaConfig"
-
-
-def topk_values_mask(M, K=0.7, return_mask=False):
-    # M: (bs, len, hidden dim) (1, len, 4096)
-
-    if K > 1:
-        K /= 100
-
-    # original_shape = M.shape
-    # print(M.shape)
-    # if M.dim() == 2:
-    #     M = M.unsqueeze(0)
-    # print(M.shape)
-
-    bs, n, d = M.shape
-    k = int(d * K)
-    k = d - k  # Keep top k elements instead of bottom k elements
-
-    # Find the k-th smallest element by magnitude for each row
-    kth_values, _ = M.abs().kthvalue(k, dim=2, keepdim=True)
-    # Create a mask tensor with True for the top k elements in each row
-    mask = M.abs() >= kth_values
-    # print(mask.shape)
-    final_mask = mask
-    # final_mask = mask.squeeze() if original_shape == M.squeeze().shape else mask
-    # print(M.shape)
-
-    if return_mask:
-        return M * final_mask, final_mask.float().mean(dim=1), final_mask
-    return M * final_mask, final_mask.float().mean(dim=1)
 
 
 def _get_unpad_data(attention_mask):
@@ -1492,55 +1459,54 @@ class LlamaForSequenceClassification(LlamaPreTrainedModel):
         )
 
 
+def topk_values_mask(M, K=0.7, return_mask=False):
+    # M: (bs, len, hidden dim) (1, len, 4096)
+
+    if K > 1:
+        K /= 100
+
+    # original_shape = M.shape
+    # print(M.shape)
+    # if M.dim() == 2:
+    #     M = M.unsqueeze(0)
+    # print(M.shape)
+
+    bs, n, d = M.shape
+    k = int(d * K)
+    k = d - k  # Keep top k elements instead of bottom k elements
+
+    # Find the k-th smallest element by magnitude for each row
+    kth_values, _ = M.abs().kthvalue(k, dim=2, keepdim=True)
+    # Create a mask tensor with True for the top k elements in each row
+    mask = M.abs() >= kth_values
+    # print(mask.shape)
+    final_mask = mask
+    # final_mask = mask.squeeze() if original_shape == M.squeeze().shape else mask
+    # print(M.shape)
+
+    if return_mask:
+        return M * final_mask, final_mask.float().mean(dim=1), final_mask
+    return M * final_mask, final_mask.float().mean(dim=1)
+
+
 class LlamaCrossAttention(LlamaAttention):
     def __init__(self, config: LlamaConfig, layer_idx: Optional[int] = None):
         super().__init__(config, layer_idx)
         self.f_proj = nn.Linear(self.hidden_size, self.hidden_size, bias=config.attention_bias)
 
-    def _init_rope(self):
-        # don't need this function
-        if self.config.rope_scaling is None:
-            self.rotary_emb = LlamaRotaryEmbedding(
-                self.head_dim,
-                max_position_embeddings=self.max_position_embeddings,
-                base=self.rope_theta,
-            )
-        else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
-            if scaling_type == "linear":
-                self.rotary_emb = LlamaLinearScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                )
-            elif scaling_type == "dynamic":
-                self.rotary_emb = LlamaDynamicNTKScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                    base=self.rope_theta,
-                )
-            else:
-                raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
-
     def forward(
             self,
             hidden_states: torch.Tensor,
             attention_mask: Optional[torch.Tensor] = None,
-            # Don't need this
             position_ids: Optional[torch.LongTensor] = None,
-            past_key_value: Optional[Cache] = None,
+            # past_key_value: Optional[Cache] = None,
             output_attentions: bool = False,
-            use_cache: bool = False,
+            # use_cache: bool = False,
             encoder_hidden_states: torch.Tensor = None,
             encoder_attention_mask: torch.Tensor = None,
             **kwargs,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor], Optional[Tuple[torch.Tensor]]]:
-        # This is wrong
         hidden_states = self.f_proj(hidden_states)
-        # This is correct
         # encoder_hidden_states = self.f_proj(encoder_hidden_states)
         attention_mask = encoder_attention_mask
 
@@ -1553,6 +1519,23 @@ class LlamaCrossAttention(LlamaAttention):
 
         if self.config.pretraining_tp > 1:
             raise Exception('Not implemented')
+
+            # key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
+            # query_slices = self.q_proj.weight.split(
+            #     (self.num_heads * self.head_dim) // self.config.pretraining_tp, dim=0
+            # )
+            # key_slices = self.k_proj.weight.split(key_value_slicing, dim=0)
+            # value_slices = self.v_proj.weight.split(key_value_slicing, dim=0)
+            #
+            # query_states = [F.linear(hidden_states, query_slices[i]) for i in range(self.config.pretraining_tp)]
+            # query_states = torch.cat(query_states, dim=-1)
+            #
+            # key_states = [F.linear(hidden_states, key_slices[i]) for i in range(self.config.pretraining_tp)]
+            # key_states = torch.cat(key_states, dim=-1)
+            #
+            # value_states = [F.linear(hidden_states, value_slices[i]) for i in range(self.config.pretraining_tp)]
+            # value_states = torch.cat(value_states, dim=-1)
+
         else:
             query_states = self.q_proj(hidden_states)
             key_states = self.k_proj(encoder_hidden_states)
@@ -1562,36 +1545,21 @@ class LlamaCrossAttention(LlamaAttention):
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
         value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
 
-        # print(query_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-        # print(key_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-        # print(value_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-
         kv_seq_len = key_states.shape[-2]
-        if past_key_value is not None:
-            if self.layer_idx is None:
-                raise ValueError(
-                    f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
-                    "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
-                    "with a layer index."
-                )
-            kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
-        # This is wrong
+        # if past_key_value is not None:
+        #     if self.layer_idx is None:
+        #         raise ValueError(
+        #             f"The cache structure has changed since version v4.36. If you are using {self.__class__.__name__} "
+        #             "for auto-regressive decoding with k/v caching, please make sure to initialize the attention class "
+        #             "with a layer index."
+        #         )
+        #     kv_seq_len += past_key_value.get_usable_length(kv_seq_len, self.layer_idx)
         cos, sin = self.rotary_emb(value_states, seq_len=kv_seq_len)
-
-        # print(query_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-        # print(key_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-        # print(value_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-
         query_states, key_states = apply_rotary_pos_emb(query_states, key_states, cos, sin, position_ids)
 
-        # print(query_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-        # print(key_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-        # print(value_states.shape)  # [1, 32, x, 128] --> [1, 32, 1, 128]
-
-        if past_key_value is not None:
-            # cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
-            cache_kwargs = {}  # Specific to RoPE models
-            key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
+        # if past_key_value is not None:
+        #     cache_kwargs = {"sin": sin, "cos": cos}  # Specific to RoPE models
+        #     key_states, value_states = past_key_value.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
         key_states = repeat_kv(key_states, self.num_key_value_groups)
         value_states = repeat_kv(value_states, self.num_key_value_groups)
@@ -1636,138 +1604,38 @@ class LlamaCrossAttention(LlamaAttention):
         if not output_attentions:
             attn_weights = None
 
-        return attn_output, attn_weights, past_key_value
+        return attn_output, attn_weights  # , past_key_value
 
 
-class TrustLlamaModel(LlamaModel):
-    def __init__(self, config: TrustLlamaConfig):
-        super().__init__(config)
+class AugLlamaModel(LlamaModel):
+    def init_aug(self, aug_model, num_cross=8):
         self.requires_grad_(False)
-        self.trust_models = []
-        for model_id, model_attn_path_pair in enumerate(config.model_attn_path_pairs):
-            print(f'Loading trust model {model_id} from {model_attn_path_pair[0]}')
-            self.trust_models.append(AutoModelForCausalLM.from_pretrained(model_attn_path_pair[0], device_map=torch.device('cuda')))
-        # self.trust_models = [AutoModelForCausalLM.from_pretrained(path) for path in config.model_paths]
-        # self.main_device = torch.device('cuda')
-        # self.backup_device = torch.device('cuda:1')
-        for i in range(len(self.trust_models)):
-            self.trust_models[i].requires_grad_(False)
-            # self.trust_models[i].to(self.backup_device)
-            # self.trust_models[i].to(self.main_device)
-        # self.trust_models = nn.ModuleList(self.trust_models)
+        self.aug_model = aug_model
+        self.aug_model.requires_grad_(False)
+        if num_cross == 8:
+            step_size = len(self.layers) / num_cross
+            self.attention_layer_idx = [i for i in range(len(self.layers)) if (i + 1) % step_size == 0]
+            assert len(self.attention_layer_idx) == num_cross
 
-        assert self.config.num_hidden_layers == len(self.layers)
-        step_size = self.config.num_hidden_layers / config.num_cross
-        self.base_layer_idx = [i for i in range(self.config.num_hidden_layers) if (i + 1) % step_size == 0]
-        assert len(self.base_layer_idx) == config.num_cross
+            self.cross_attentions = nn.ModuleList(
+                [LlamaCrossAttention(self.config) for layer_idx in range(num_cross)]
+            )
+        elif num_cross == 6:
+            step_size = len(self.layers) / 4
+            self.attention_layer_idx = [i for i in range(len(self.layers)) if i % step_size == 0]  # 0, 8, 16, 24
+            self.attention_layer_idx += [28, 30]
+            assert len(self.attention_layer_idx) == num_cross
 
-        trust_model_layer_idx = []
-        for model in self.trust_models:
-            step_size = model.config.num_hidden_layers / config.num_cross
-            trust_model_layer_idx.append([i for i in range(model.config.num_hidden_layers) if (i + 1) % step_size == 0])
-
-        self.base_layer_idx_2_trust_layer_idx = {layer_idx[0]: layer_idx[1:] for layer_idx in zip(*([self.base_layer_idx] + trust_model_layer_idx))}
-        print(self.base_layer_idx_2_trust_layer_idx)
-
-        self.trust_model_look_up = None
-        self.base_model_look_up = None
-        self.cross_attn_look_up = None
-        self.init_layer_idx_lookup_table()
-
-        # re-assign layer_idx for trust models and base model
-        for layer_id in range(len(self.layers)):
-            assert self.layers[layer_id].self_attn.layer_idx == layer_id
-            self.layers[layer_id].self_attn.layer_idx = self.get_layer_idx(base_layer_id=layer_id)
-        for model_id in range(len(self.trust_models)):
-            for layer_id in range(len(self.trust_models[model_id].model.layers)):
-                assert self.trust_models[model_id].model.layers[layer_id].self_attn.layer_idx == layer_id
-                self.trust_models[model_id].model.layers[layer_id].self_attn.layer_idx = \
-                    self.get_layer_idx(trust_model_id=model_id, trust_model_layer_id=layer_id)
-
-        self.cross_attentions = []
-        for model_id in range(len(self.trust_models)):
-            model_cross_attentions = [LlamaCrossAttention(config, self.get_layer_idx(cross_id=model_id, cross_layer_id=layer_idx)) for layer_idx in range(config.num_cross)]
-            self.cross_attentions.append(nn.ModuleList(model_cross_attentions))
-        self.cross_attentions = nn.ModuleList(self.cross_attentions)
+            self.cross_attentions = nn.ModuleList(
+                [LlamaCrossAttention(self.config) for layer_idx in range(num_cross)]
+            )
+        else:
+            raise Exception('Unknown num_cross')
 
         self.gradient_checkpointing = False
         # Initialize weights and apply final processing
         self.post_init()
 
-    def get_layer_idx(
-            self,
-            base_layer_id=None,
-            trust_model_id=None, trust_model_layer_id=None,
-            cross_id=None, cross_layer_id=None
-    ):
-        #  past_key_value layers:
-        #    trust models: n * model.config.num_hidden_layers
-        #    base model: self.config.num_hidden_layers
-        #    cross attentions: n * self.config.num_cross
-        assert sum(x is not None for x in [base_layer_id, trust_model_layer_id, cross_layer_id]) == 1, "Can only provide 1 layer id."
-        if base_layer_id is not None:
-            layer_idx = self.base_model_look_up[base_layer_id]
-        elif trust_model_layer_id is not None:
-            assert trust_model_id is not None, "Please provide trust_model_id"
-            assert cross_id is None, "Please do not provide cross_id"
-            layer_idx = self.trust_model_look_up[trust_model_id][trust_model_layer_id]
-        else:
-            assert cross_id is not None, "Please provide cross_id"
-            assert trust_model_id is None, "Please do not provide trust_model_id"
-            layer_idx = self.cross_attn_look_up[cross_id][cross_layer_id]
-
-        return layer_idx
-
-    # def get_layer_idx(
-    #         self,
-    #         base_layer_id=None,
-    #         trust_model_id=None, trust_model_layer_id=None,
-    #         cross_id=None, cross_layer_id=None
-    # ):
-    #     #  past_key_value layers:
-    #     #    trust models: n * model.config.num_hidden_layers
-    #     #    base model: self.config.num_hidden_layers
-    #     #    cross attentions: n * self.config.num_cross
-    #     assert sum(x is not None for x in [base_layer_id, trust_model_layer_id, cross_layer_id]) == 1, "Can only provide 1 layer id."
-    #     if base_layer_id is not None:
-    #         layer_idx = base_layer_id
-    #     elif trust_model_layer_id is not None:
-    #         assert trust_model_id is not None, "Please provide trust_model_id"
-    #         assert cross_id is None, "Please do not provide cross_id"
-    #         layer_idx = self.config.num_hidden_layers
-    #         for i in range(len(self.trust_models)):
-    #             if i < trust_model_id:
-    #                 layer_idx += self.trust_models[i].config.num_hidden_layers
-    #             elif i == trust_model_id:
-    #                 layer_idx += trust_model_layer_id
-    #                 break
-    #             else:
-    #                 raise Exception("Bug")
-    #     else:
-    #         assert cross_id is not None, "Please provide cross_id"
-    #         assert trust_model_id is None, "Please do not provide trust_model_id"
-    #         layer_idx = self.config.num_hidden_layers + \
-    #                     sum([model.config.num_hidden_layers for model in self.trust_models]) + \
-    #                     cross_id * self.config.num_cross + cross_layer_id
-    #
-    #     return layer_idx
-
-    def init_layer_idx_lookup_table(self):
-        self.trust_model_look_up = [[] for i in range(len(self.trust_models))]  # len(self.trust_models) * self.trust_models[i].config.num_hidden_layers
-        self.base_model_look_up = []  # self.config.num_hidden_layers
-        self.cross_attn_look_up = [[] for i in range(len(self.trust_models))]  # len(self.trust_models) * config.num_cross
-        current_layer_idx = 0
-        for i in range(len(self.trust_models)):
-            for j in range(self.trust_models[i].config.num_hidden_layers):
-                self.trust_model_look_up[i].append(current_layer_idx)
-                current_layer_idx += 1
-        for current_base_layer_idx in range(self.config.num_hidden_layers):
-            self.base_model_look_up.append(current_layer_idx)
-            current_layer_idx += 1
-            if current_base_layer_idx in self.base_layer_idx_2_trust_layer_idx.keys():
-                for i in range(len(self.trust_models)):
-                    self.cross_attn_look_up[i].append(current_layer_idx)
-                    current_layer_idx += 1
 
     def forward(
             self,
@@ -1781,6 +1649,20 @@ class TrustLlamaModel(LlamaModel):
             output_hidden_states: Optional[bool] = None,
             return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
+        assert past_key_values is None
+        aug_outputs = self.aug_model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            position_ids=position_ids,
+            # past_key_values=past_key_values,
+            # inputs_embeds=inputs_embeds,
+            # use_cache=use_cache,
+            # output_attentions=output_attentions,
+            output_hidden_states=True,
+            # return_dict=return_dict,
+        )
+        aug_hidden_states = aug_outputs.hidden_states[1:]
+
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
             output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
@@ -1814,22 +1696,6 @@ class TrustLlamaModel(LlamaModel):
             if use_legacy_cache:
                 past_key_values = DynamicCache.from_legacy_cache(past_key_values)
             past_key_values_length = past_key_values.get_usable_length(seq_length)
-
-        trust_hidden_states = []
-        for i in range(len(self.trust_models)):
-            trust_output = self.trust_models[i](
-                input_ids=input_ids,  # if input_ids is None else input_ids.to(self.backup_device),
-                attention_mask=attention_mask,  # if attention_mask is None else attention_mask.to(self.backup_device),
-                position_ids=position_ids,  # if position_ids is None else position_ids.to(self.backup_device),
-                past_key_values=past_key_values,
-                inputs_embeds=inputs_embeds,
-                use_cache=use_cache,
-                output_attentions=output_attentions,
-                output_hidden_states=True,
-                return_dict=return_dict,
-            )
-            trust_hidden_states.append(trust_output.hidden_states[1:])
-            past_key_values = trust_output.past_key_values
 
         if position_ids is None:
             device = input_ids.device if input_ids is not None else inputs_embeds.device
@@ -1897,37 +1763,26 @@ class TrustLlamaModel(LlamaModel):
 
             hidden_states = layer_outputs[0]
 
-            if decoder_layer_id in self.base_layer_idx:
-                trust_layer_idx_list = self.base_layer_idx_2_trust_layer_idx[decoder_layer_id]
-                cross_attention_id = self.base_layer_idx.index(decoder_layer_id)
-                attn_outputs = []
-                for model_id, trust_layer_idx in enumerate(trust_layer_idx_list):
-                    encoder_hidden_states = trust_hidden_states[model_id][trust_layer_idx]  # .to(self.main_device)
-                    attn_output, _, past_key_values = self.cross_attentions[model_id][cross_attention_id](
-                        hidden_states=hidden_states,
-                        attention_mask=attention_mask,
-                        position_ids=position_ids,
-                        encoder_hidden_states=encoder_hidden_states,
-                        encoder_attention_mask=attention_mask,
-                        past_key_value=past_key_values,
-                        output_attentions=output_attentions,
-                        use_cache=use_cache,
-                    )
-                    # attn_output, _ = topk_values_mask(attn_output, K=50)
-                    attn_outputs.append(attn_output)
+            if decoder_layer_id in self.attention_layer_idx:
+                cross_attention_id = self.attention_layer_idx.index(decoder_layer_id)
+                encoder_hidden_states = aug_hidden_states[decoder_layer_id]
+                attn_output, _ = self.cross_attentions[cross_attention_id](
+                    hidden_states=hidden_states,
+                    attention_mask=attention_mask,
+                    encoder_hidden_states=encoder_hidden_states,
+                    encoder_attention_mask=attention_mask,
+                )
 
-                for i in range(len(self.trust_models)):
-                    attn_weight = 1
-                    hidden_states += attn_outputs[i] * attn_weight
+                # attn_output, _ = topk_values_mask(attn_output, K=90)
+
+                hidden_states = hidden_states + attn_output * 0
 
                 # h = hidden_states.clone().detach().cpu()
                 # a = attn_output.clone().detach().cpu()
                 # residuals.append([h, a])
-                if use_cache:
-                    next_decoder_cache = past_key_values
-            else:
-                if use_cache:
-                    next_decoder_cache = layer_outputs[2 if output_attentions else 1]
+
+            if use_cache:
+                next_decoder_cache = layer_outputs[2 if output_attentions else 1]
 
             if output_attentions:
                 all_self_attns += (layer_outputs[1],)
@@ -1958,103 +1813,85 @@ class TrustLlamaModel(LlamaModel):
         )
 
 
-class TrustLlamaForCausalLM(LlamaForCausalLM):
+class AugLlamaForCausalLM(LlamaForCausalLM):
     def __init__(self, config):
         super().__init__(config)
-        self.model = TrustLlamaModel(config)
+        self.model = AugLlamaModel(config)
 
         # Initialize weights and apply final processing
         self.post_init()
 
-    def save_pretrained(self, path, **kwargs):
-        assert len(self.model.trust_models) == 1, "The model is designed to save with only 1 trust model"
+    def init_aug(self, aug_model, num_cross=8):
+        self.requires_grad_(False)
+        self.model.init_aug(aug_model, num_cross)
+
+    def save_pretrained(self, path):
+        super().save_pretrained(path)
         cross_attention_dict = {k: v for k, v in self.state_dict().items() if 'model.cross_attentions' in k}
-        super().save_pretrained(path, state_dict=cross_attention_dict, **kwargs)
+        torch.save(cross_attention_dict, os.path.join(path, 'ca.pt'))
+        # torch.save(self.state_dict(), os.path.join(path, 'm.pt'))
 
-    @classmethod
-    def from_pretrained(
-        cls,
-        pretrained_model_name_or_path: Optional[Union[str, os.PathLike]],
-        **kwargs,
+    def load(self, path):
+        cross_attention_dict = torch.load(os.path.join(path, 'ca.pt'))
+        self.load_state_dict(cross_attention_dict, strict=False)
+        # self.load_state_dict(torch.load(os.path.join(path, 'm.pt')))
+
+    def prepare_inputs_for_generation(
+        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
     ):
-        model, loading_info = super().from_pretrained('meta-llama/Llama-2-7b-chat-hf', output_loading_info=True, **kwargs)
-        for model_id, model_attn_path_pair in enumerate(model.config.model_attn_path_pairs):
-            if len(model_attn_path_pair) == 1:
-                print(f'Missing cross attention weights for trust model {model_id}.')
-            elif len(model_attn_path_pair) == 2:
-                print(f'Loading cross attention weights for trust model {model_id} from {model_attn_path_pair[1]}')
-                archive_file = os.path.join(model_attn_path_pair[1], _add_variant(SAFE_WEIGHTS_NAME, variant=None))
-                # cross_attention_state_dict = load_state_dict('/data/chejian_xu/finetune/llama_aug/model_f_proj_on_query/model_causal_60k/8/meta-llama/Llama-2-7b-chat-hf_sft/adv/ca.pt')
-                cross_attention_state_dict = load_state_dict(archive_file)
-                modified_state_dict = {}
-                for key, value in cross_attention_state_dict.items():
-                    new_key = key.replace('model.cross_attentions.0', f'model.cross_attentions.{model_id}')
-                    # new_key = key.replace('model.cross_attentions', f'model.cross_attentions.{model_id}')
-                    modified_state_dict[new_key] = value
-                    loading_info['missing_keys'].remove(new_key)
-                model.load_state_dict(modified_state_dict, strict=False)
-                # error_msgs = _load_state_dict_into_model(model_to_load, state_dict, start_prefix)
-        print(loading_info)
-        # for i in range(len(model.model.trust_models)):
-        #     model.model.trust_models[i].cuda()
-        return model
+        # No caching for augmented models
+        past_key_values = None
 
-    # def prepare_inputs_for_generation(
-    #     self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
-    # ):
-    #     # No caching for augmented models
-    #     past_key_values = None
-    #
-    #     if past_key_values is not None:
-    #         if isinstance(past_key_values, Cache):
-    #             cache_length = past_key_values.get_seq_length()
-    #             past_length = past_key_values.seen_tokens
-    #             max_cache_length = past_key_values.get_max_length()
-    #         else:
-    #             cache_length = past_length = past_key_values[0][0].shape[2]
-    #             max_cache_length = None
-    #
-    #         # Keep only the unprocessed tokens:
-    #         # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
-    #         # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as
-    #         # input)
-    #         if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:  # both (batch_size, sequence_length)
-    #             input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
-    #         # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
-    #         # input_ids based on the past_length.
-    #         elif past_length < input_ids.shape[1]:
-    #             input_ids = input_ids[:, past_length:]
-    #         # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids only has unprocessed tokens.
-    #
-    #         # If we are about to go beyond the maximum cache length, we need to crop the input attention mask.
-    #         if (
-    #             max_cache_length is not None
-    #             and attention_mask is not None
-    #             and cache_length + input_ids.shape[1] > max_cache_length
-    #         ):
-    #             attention_mask = attention_mask[:, -max_cache_length:]
-    #
-    #     position_ids = kwargs.get("position_ids", None)
-    #     if attention_mask is not None and position_ids is None:
-    #         # create position_ids on the fly for batch generation
-    #         position_ids = attention_mask.long().cumsum(-1) - 1
-    #         position_ids.masked_fill_(attention_mask == 0, 1)
-    #         if past_key_values:
-    #             position_ids = position_ids[:, -input_ids.shape[1] :]
-    #
-    #     # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-    #     if inputs_embeds is not None and past_key_values is None:
-    #         model_inputs = {"inputs_embeds": inputs_embeds}
-    #     else:
-    #         model_inputs = {"input_ids": input_ids}
-    #
-    #     model_inputs.update(
-    #         {
-    #             "position_ids": position_ids,
-    #             "past_key_values": past_key_values,
-    #             "use_cache": False,
-    #             # "use_cache": kwargs.get("use_cache"),
-    #             "attention_mask": attention_mask,
-    #         }
-    #     )
-    #     return model_inputs
+        if past_key_values is not None:
+            if isinstance(past_key_values, Cache):
+                cache_length = past_key_values.get_seq_length()
+                past_length = past_key_values.seen_tokens
+                max_cache_length = past_key_values.get_max_length()
+            else:
+                cache_length = past_length = past_key_values[0][0].shape[2]
+                max_cache_length = None
+
+            # Keep only the unprocessed tokens:
+            # 1 - If the length of the attention_mask exceeds the length of input_ids, then we are in a setting where
+            # some of the inputs are exclusively passed as part of the cache (e.g. when passing input_embeds as
+            # input)
+            if attention_mask is not None and attention_mask.shape[1] > input_ids.shape[1]:  # both (batch_size, sequence_length)
+                input_ids = input_ids[:, -(attention_mask.shape[1] - past_length) :]
+            # 2 - If the past_length is smaller than input_ids', then input_ids holds all input tokens. We can discard
+            # input_ids based on the past_length.
+            elif past_length < input_ids.shape[1]:
+                input_ids = input_ids[:, past_length:]
+            # 3 - Otherwise (past_length >= input_ids.shape[1]), let's assume input_ids only has unprocessed tokens.
+
+            # If we are about to go beyond the maximum cache length, we need to crop the input attention mask.
+            if (
+                max_cache_length is not None
+                and attention_mask is not None
+                and cache_length + input_ids.shape[1] > max_cache_length
+            ):
+                attention_mask = attention_mask[:, -max_cache_length:]
+
+        position_ids = kwargs.get("position_ids", None)
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
+
+        # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
+        if inputs_embeds is not None and past_key_values is None:
+            model_inputs = {"inputs_embeds": inputs_embeds}
+        else:
+            model_inputs = {"input_ids": input_ids}
+
+        model_inputs.update(
+            {
+                "position_ids": position_ids,
+                "past_key_values": past_key_values,
+                "use_cache": False,
+                # "use_cache": kwargs.get("use_cache"),
+                "attention_mask": attention_mask,
+            }
+        )
+        return model_inputs

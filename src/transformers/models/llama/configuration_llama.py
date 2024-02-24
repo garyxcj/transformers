@@ -189,3 +189,13 @@ class LlamaConfig(PretrainedConfig):
             )
         if rope_scaling_factor is None or not isinstance(rope_scaling_factor, float) or rope_scaling_factor <= 1.0:
             raise ValueError(f"`rope_scaling`'s factor field must be a float > 1, got {rope_scaling_factor}")
+
+
+class TrustLlamaConfig(LlamaConfig):
+
+    model_type = "trust_llama"
+
+    def __init__(self, model_attn_path_pairs=[], num_cross=8, **kwargs):
+        super().__init__(**kwargs)
+        self.model_attn_path_pairs = model_attn_path_pairs
+        self.num_cross = num_cross

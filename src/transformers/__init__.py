@@ -547,7 +547,7 @@ _import_structure = {
     "models.led": ["LED_PRETRAINED_CONFIG_ARCHIVE_MAP", "LEDConfig", "LEDTokenizer"],
     "models.levit": ["LEVIT_PRETRAINED_CONFIG_ARCHIVE_MAP", "LevitConfig"],
     "models.lilt": ["LILT_PRETRAINED_CONFIG_ARCHIVE_MAP", "LiltConfig"],
-    "models.llama": ["LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP", "LlamaConfig"],
+    "models.llama": ["LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP", "LlamaConfig", "TrustLlamaConfig"],
     "models.llava": [
         "LLAVA_PRETRAINED_CONFIG_ARCHIVE_MAP",
         "LlavaConfig",
@@ -2461,6 +2461,7 @@ else:
     )
     _import_structure["models.llama"].extend(
         [
+            "TrustLlamaForCausalLM",
             "LlamaForCausalLM",
             "LlamaForSequenceClassification",
             "LlamaModel",
@@ -5235,7 +5236,7 @@ if TYPE_CHECKING:
     from .models.led import LED_PRETRAINED_CONFIG_ARCHIVE_MAP, LEDConfig, LEDTokenizer
     from .models.levit import LEVIT_PRETRAINED_CONFIG_ARCHIVE_MAP, LevitConfig
     from .models.lilt import LILT_PRETRAINED_CONFIG_ARCHIVE_MAP, LiltConfig
-    from .models.llama import LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP, LlamaConfig
+    from .models.llama import LLAMA_PRETRAINED_CONFIG_ARCHIVE_MAP, LlamaConfig, TrustLlamaConfig
     from .models.llava import (
         LLAVA_PRETRAINED_CONFIG_ARCHIVE_MAP,
         LlavaConfig,
@@ -6961,7 +6962,7 @@ if TYPE_CHECKING:
             LiltModel,
             LiltPreTrainedModel,
         )
-        from .models.llama import LlamaForCausalLM, LlamaForSequenceClassification, LlamaModel, LlamaPreTrainedModel
+        from .models.llama import TrustLlamaForCausalLM, LlamaForCausalLM, LlamaForSequenceClassification, LlamaModel, LlamaPreTrainedModel
         from .models.llava import (
             LLAVA_PRETRAINED_MODEL_ARCHIVE_LIST,
             LlavaForConditionalGeneration,
