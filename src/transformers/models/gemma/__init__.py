@@ -24,7 +24,7 @@ from ...utils import (
 
 
 _import_structure = {
-    "configuration_gemma": ["GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP", "GemmaConfig"],
+    "configuration_gemma": ["GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP", "GemmaConfig", "TrustGemmaConfig"],
 }
 
 try:
@@ -51,6 +51,7 @@ except OptionalDependencyNotAvailable:
     pass
 else:
     _import_structure["modeling_gemma"] = [
+        "TrustGemmaForCausalLM",
         "GemmaForCausalLM",
         "GemmaModel",
         "GemmaPreTrainedModel",
@@ -71,7 +72,7 @@ else:
 
 
 if TYPE_CHECKING:
-    from .configuration_gemma import GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP, GemmaConfig
+    from .configuration_gemma import GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP, GemmaConfig, TrustGemmaConfig
 
     try:
         if not is_sentencepiece_available():
@@ -96,6 +97,7 @@ if TYPE_CHECKING:
         pass
     else:
         from .modeling_gemma import (
+            TrustGemmaForCausalLM,
             GemmaForCausalLM,
             GemmaForSequenceClassification,
             GemmaModel,

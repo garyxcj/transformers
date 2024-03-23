@@ -456,7 +456,7 @@ _import_structure = {
         "FunnelTokenizer",
     ],
     "models.fuyu": ["FUYU_PRETRAINED_CONFIG_ARCHIVE_MAP", "FuyuConfig"],
-    "models.gemma": ["GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP", "GemmaConfig"],
+    "models.gemma": ["GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP", "GemmaConfig", "TrustGemmaConfig"],
     "models.git": [
         "GIT_PRETRAINED_CONFIG_ARCHIVE_MAP",
         "GitConfig",
@@ -2249,6 +2249,7 @@ else:
     _import_structure["models.fuyu"].extend(["FuyuForCausalLM", "FuyuPreTrainedModel"])
     _import_structure["models.gemma"].extend(
         [
+            "TrustGemmaForCausalLM",
             "GemmaForCausalLM",
             "GemmaForSequenceClassification",
             "GemmaModel",
@@ -5231,7 +5232,7 @@ if TYPE_CHECKING:
         FunnelTokenizer,
     )
     from .models.fuyu import FUYU_PRETRAINED_CONFIG_ARCHIVE_MAP, FuyuConfig
-    from .models.gemma import GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP, GemmaConfig
+    from .models.gemma import GEMMA_PRETRAINED_CONFIG_ARCHIVE_MAP, GemmaConfig, TrustGemmaConfig
     from .models.git import (
         GIT_PRETRAINED_CONFIG_ARCHIVE_MAP,
         GitConfig,
@@ -6876,6 +6877,7 @@ if TYPE_CHECKING:
         )
         from .models.gemma import (
             GemmaForCausalLM,
+            TrustGemmaForCausalLM,
             GemmaForSequenceClassification,
             GemmaModel,
             GemmaPreTrainedModel,

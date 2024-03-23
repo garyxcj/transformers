@@ -145,3 +145,18 @@ class GemmaConfig(PretrainedConfig):
             tie_word_embeddings=tie_word_embeddings,
             **kwargs,
         )
+
+
+class TrustGemmaConfig(GemmaConfig):
+
+    model_type = "trust_gemma"
+
+    def __init__(self, model_attn_path_pairs=[], num_cross=3, attn_lambdas=[], attn_weights=[], attn_top_k=[], merge_func="dis-sum", **kwargs):
+        super().__init__(**kwargs)
+        self.model_attn_path_pairs = model_attn_path_pairs
+        self.num_cross = num_cross
+        self.attn_lambdas = attn_lambdas
+        self.attn_weights = attn_weights
+        self.attn_top_k = attn_top_k
+        self.merge_func = merge_func
+        # assert len(self.model_attn_path_pairs) == len(self.attn_weights) == len(self.top_k)
